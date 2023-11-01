@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:get/get.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:zoom_native_sdk/zoom_native_sdk.dart';
 import 'package:zooom_poc/components/custom_snackbar.dart';
+import 'package:zooom_poc/utils/constants.dart';
+import 'package:zooom_poc/zoom_controller.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -16,6 +19,8 @@ class _HomePageState extends State<HomePage> {
   bool isPermissionGranted = false;
   final _zoomNativelyPlugin = ZoomNativeSdk();
   bool isInitialized = false;
+
+  final ZoomController controller = Get.put(ZoomController());
 
   String browserUrl =
       "https://zoom.us/j/91804939335?pwd=eWloaThZSDB1WTVrWCtZbW01cG91dz09";
@@ -34,14 +39,15 @@ class _HomePageState extends State<HomePage> {
     try {
       if (!isInitialized) {
         isInitialized = (await _zoomNativelyPlugin.initZoom(
-              appKey: "zNIvlRt_QiG0R5_7BOjhw", //uO9W5xDKTUavDQEALxeLA
-              appSecret:
-                  "FfHUx2FCS7DX23xn1sa6Qxmy8BsbuVSj", //rB5CeAStldfZHxrO2jO4QE56r8TYTHn8
+              appKey:
+                  controller.clientIdController.text, //uO9W5xDKTUavDQEALxeLA
+              appSecret: controller.clientSecretIdController
+                  .text, //rB5CeAStldfZHxrO2jO4QE56r8TYTHn8
             )) ??
             false;
       }
     } on PlatformException catch (e) {
-      // debugPrint(e.message);
+      debugPrint(e.message);
     }
 
     // If the widget was removed from the tree while the asynchronous platform
@@ -62,7 +68,9 @@ class _HomePageState extends State<HomePage> {
       final uri = Uri.tryParse(value ?? "");
 
       // Check if the URL is valid
-      if (uri == null || uri.scheme != 'https' || uri.host != 'zoom.us') {
+      if (uri == null ||
+          !uri.scheme.startsWith('https') ||
+          !uri.host.contains('zoom.us')) {
         return "Invalid URL";
       }
 
@@ -88,10 +96,10 @@ class _HomePageState extends State<HomePage> {
         return "Meeting ID and password cannot be empty";
       }
 
-      // final result = _convertToBrowserLink(value ?? "");
-      // if (result == null) {
-      //   return "There is some issue with the url";
-      // }
+      final result = _getMeetIdPass(value ?? "");
+      if (result.isEmpty || result.length != 2) {
+        return "There is some issue with the url";
+      }
 
       return null;
     } catch (e) {
@@ -99,9 +107,8 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  final TextEditingController _urlController = TextEditingController(
-      text:
-          "https://zoom.us/j/91804939335?pwd=eWloaThZSDB1WTVrWCtZbW01cG91dz09");
+  final TextEditingController _urlController =
+      TextEditingController(text: Constants.meetUrl);
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
 
   @override
@@ -119,6 +126,76 @@ class _HomePageState extends State<HomePage> {
             const Text("Zoom with Flutter"),
           ],
         ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.more_vert),
+            onPressed: () async {
+              await Get.dialog(
+                AlertDialog(
+                  title: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Enter Details'),
+                      TextButton(
+                          onPressed: () {
+                            controller.clearTextField();
+                          },
+                          child: const Text("Reset"))
+                    ],
+                  ),
+                  content: Form(
+                    child: GetBuilder<ZoomController>(
+                      id: ZoomController.rebuildTextField,
+                      builder: (_) {
+                        return Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            TextFormField(
+                              controller: controller.clientIdController,
+                              decoration:
+                                  const InputDecoration(labelText: 'Client ID'),
+                              maxLines: 1,
+                            ),
+                            TextFormField(
+                              controller: controller.clientSecretIdController,
+                              decoration: const InputDecoration(
+                                  labelText: 'Client Secret ID'),
+                              maxLines: 2,
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () {
+                        controller.clearTextField();
+                        Get.back();
+                      },
+                      child: const Text('Cancel'),
+                    ),
+                    TextButton(
+                      onPressed: () async {
+                        // Handle submit action
+                        //if the id changed
+                        if (controller.clientIdController.text !=
+                                Constants.clientId ||
+                            controller.clientSecretIdController.text !=
+                                Constants.clientSecretId) {
+                          isInitialized = false;
+                          await initPlatformState();
+                        }
+                        Get.back();
+                      },
+                      child: const Text('Submit'),
+                    ),
+                  ],
+                ),
+              );
+            },
+          )
+        ],
       ),
       body: Center(
         child: Form(
@@ -200,11 +277,9 @@ class _HomePageState extends State<HomePage> {
         return;
       }
     } else {
-      _urlController.text =
-          "https://zoom.us/j/91804939335?pwd=eWloaThZSDB1WTVrWCtZbW01cG91dz09";
+      _urlController.text = Constants.meetUrl;
       setState(() {});
-      List<String> result = _getMeetIdPass(
-          "https://zoom.us/j/91804939335?pwd=eWloaThZSDB1WTVrWCtZbW01cG91dz09");
+      List<String> result = _getMeetIdPass(Constants.meetUrl);
       if (result.isNotEmpty) {
         meetingId = result.first;
         meetingPassword = result.last;
@@ -244,13 +319,29 @@ class _HomePageState extends State<HomePage> {
 
 List<String> _getMeetIdPass(String inputUrl) {
   try {
-    // Extract the Meeting ID and Password from the input URL.
-    String meetingId =
-        inputUrl.split('https://zoom.us/j/')[1].split('?pwd=')[0];
-    String password = inputUrl.split('?pwd=')[1];
+    // Parse the URL
+    Uri uri = Uri.parse(inputUrl);
 
-    return [meetingId, password];
+    // Extract the meeting ID from the path
+    String meetingId = uri.pathSegments.last;
+
+    // Extract the password from the query parameters
+    String? password = uri.queryParameters['pwd'];
+
+    // Check if both meeting ID and password are present
+    if (meetingId.isNotEmpty && password != null && password.isNotEmpty) {
+      // Remove any trailing .1 or similar numeric suffix
+      String cleanedPassword =
+          RegExp(r'(.*?)(\.\d+)?$').firstMatch(password)?.group(1) ?? "";
+
+      if (cleanedPassword.isNotEmpty) {
+        return [meetingId, cleanedPassword];
+      }
+    }
   } catch (e) {
-    return [];
+    // Handle exception if needed
   }
+
+  // Return an empty list if extraction fails
+  return [];
 }
